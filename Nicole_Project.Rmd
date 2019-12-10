@@ -1,0 +1,277 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(GGally)
+library(caTools)
+library(ROCR)
+library(rpart) # CART
+library(rpart.plot) # CART plotting
+library(caret) # cross validation
+library(tm.plugin.webmining)
+```
+
+```{r}
+dataset <- read.csv("dataset_3.csv")
+head(dataset)
+dataset <- subset(dataset,select = -c(Time))
+
+dataset$Visitor <- as.numeric(dataset$Visitor)
+dataset$Month <- as.numeric(dataset$Month)
+dataset$Day.of.Week <- as.numeric(dataset$Day.of.Week)
+
+set.seed(456)
+train.ids = sample(nrow(dataset), 0.75*nrow(dataset))
+train = dataset[train.ids,]
+test = dataset[-train.ids,]
+
+
+#Feature Selection 
+
+mod1 <- lm(Attendance ~  ., 
+           data = train)
+summary(mod1)
+wPredictions <- predict(mod1, newdata=test)
+SSE = sum((test$Attendance - wPredictions)^2)
+SST = sum((test$Attendance - mean(train$Attendance))^2)
+OSR2 = 1 - SSE/SST
+OSR2
+library(car)
+vif(mod1)
+
+
+library(caret)
+rpartImp <- varImp(mod1)
+print(rpartImp)
+
+
+mod2 <- lm(Attendance ~  Capacity + Curr.Win.. + LS.Win.. + Last.Game + H.Pop + V.Pop + Visitor, 
+           data = train)
+summary(mod2)
+wPredictions <- predict(mod2, newdata=test)
+SSE = sum((test$Attendance - wPredictions)^2)
+SST = sum((test$Attendance - mean(train$Attendance))^2)
+OSR2 = 1 - SSE/SST
+OSR2
+library(car)
+
+
+
+RMSE = sqrt(mean((wPredictions - test$Attendance)^2))
+RMSE
+
+MAE = mean(abs(wPredictions- test$Attendance))
+MAE
+
+
+
+#Let's try more transformations:
+
+#dataset$cappercentage <- dataset$Attendance/dataset$Capacity
+#dataset$lgpercentage <- dataset$Last.Game/dataset$Capacity
+#dataset$lgvopercentage <- dataset$Last.Attendance.vs.Opp/dataset$Capacity
+
+#dataset <- subset(dataset, select = -c(Attendance, Last.Game,Last.Attendance.vs.Opp))
+
+#set.seed(456)
+#train.ids = sample(nrow(dataset), 0.75*nrow(dataset))
+#train = dataset[train.ids,]
+#test = dataset[-train.ids,]
+
+#I found that doing this transformation actually didn't benefit the model whatsoever. the OSR2 of the basic OLS,is far lower than the OSR2 of model with all the features. 
+
+
+
+mod1 <- lm(Attendance ~  ., 
+           data = train)
+summary(mod1)
+wPredictions <- predict(mod1, newdata=test)
+SSE = sum((test$Attendance - wPredictions)^2)
+SST = sum((test$Attendance - mean(train$Attendance))^2)
+OSR2 = 1 - SSE/SST
+OSR2
+vif(mod1)
+
+library(MASS)  # Package needed to generate correlated precictors
+library(glmnet)
+
+y.train <- train$Attendance
+x.train <- model.matrix(Attendance ~ ., train)
+fit.lasso <- glmnet(x.train, y.train, family="gaussian", alpha=1)
+fit.ridge <- glmnet(x.train, y.train, family="gaussian", alpha=0)
+
+
+y.test <- test$Attendance
+x.test <- model.matrix(Attendance ~., test)
+
+
+train.df <- as.data.frame(cbind(y.train, x.train))
+mod.naive <- lm(y.train ~ ., data = train.df)
+summary(mod.naive)
+
+
+#RidgeRegression 
+set.seed(456)
+mod.ridge <- glmnet(x = x.train, y = y.train, alpha = 0)
+mod.ridge$lambda
+coefs.ridge <- coef(mod.ridge)
+
+set.seed(456)
+cv.ridge <- cv.glmnet(x = x.train, y = y.train, alpha = 0)
+
+library(stringr)
+plot(cv.ridge)
+print(str_c("Chosen lambda: ", cv.ridge$lambda.1se))
+pred.ridge.train <- predict(cv.ridge, newx = x.train)
+pred.ridge.test <- predict(cv.ridge, newx = x.test)
+printMetrics(y.train, y.test, pred.ridge.train, pred.ridge.test)
+
+
+
+
+
+#Lasso
+set.seed(456)
+cv.lasso <- cv.glmnet(x = x.train, y = y.train, alpha = 1)
+
+cv.lasso$lambda.min
+cv.lasso$lambda.1se
+
+plot(cv.lasso)
+
+pred.lasso.train <- predict(cv.lasso, newx = x.train)
+pred.lasso.test <- predict(cv.lasso, newx = x.test)
+
+nzero.lasso <- predict(cv.lasso, type = "nonzero")
+
+printMetrics(y.train, y.test, pred.lasso.train, pred.lasso.test)
+
+
+#Naive Least Squares
+pred.naivelr.train <- predict(mod.ridge, newx = x.train, s = 0, exact = TRUE,x = x.train, y = y.train)
+pred.naivelr.test <- predict(mod.ridge, newx = x.test, s = 0, exact = TRUE, x = x.train, y = y.train)
+printMetrics(y.train, y.test, pred.naivelr.train, pred.naivelr.test)
+
+#Forward Stepwise
+mod.initial <- lm(y.train ~ 1, data = train.df)
+forward.big <- formula(lm(y.train ~ ., data = train.df))
+mod.forward <- step(mod.initial, steps = 25, direction = "forward", scope = forward.big)
+
+
+# predictions
+test.df <- as.data.frame(cbind(y.test, x.test))
+
+pred.forward.train <- predict(mod.forward, newdata = train.df)
+pred.forward.test <- predict(mod.forward, newdata = test.df)
+
+printMetrics(y.train, y.test, pred.forward.train, pred.forward.test)
+
+
+#RF
+set.seed(456)
+library(randomForest)
+mod.rf <- randomForest(x = x.train, y = y.train, do.trace = FALSE)
+pred.rf.train <- predict(mod.rf, newdata = x.train)
+pred.rf.test <- predict(mod.rf, newdata = x.test)
+
+printMetrics(y.train, y.test, pred.rf.train, pred.rf.test)
+
+
+#RF more complex model - 5 CVs = 62%
+
+set.seed(456)
+train.rf = train(Attendance ~ .,
+                 data = train,
+                 method = "rf",trControl = trainControl(method = "cv", number = 5, verboseIter = TRUE))
+train.rf
+train.rf$results
+
+
+mod.rf = train.rf$finalModel
+set.seed(456)
+predict.rf = predict(mod.rf, newdata =test)
+
+
+SSE = sum((test$Attendance - predict.rf)^2)
+SST = sum((test$Attendance - mean(train$Attendance))^2)
+OSR2 = 1 - SSE/SST
+OSR2
+
+
+#BOOSTING
+
+set.seed(456)
+train.boost <- train(Attendance ~ .,
+                     data = train,
+                     method = "gbm",
+                     tuneGrid = expand.grid(n.trees = (1:100)*10, interaction.depth = 10,
+                       shrinkage=0.1,
+                       n.minobsinnode = 10),
+                     trControl = trainControl(method="cv", number=5, verboseIter = TRUE),
+                     metric = "RMSE",
+                     distribution = "gaussian")
+train.boost
+train.boost$results
+
+
+mod.boost = train.boost$finalModel
+
+soTest.mm = as.data.frame(model.matrix(Attendance ~ . +0, data = test))
+predict.boost = predict(mod.boost, newdata = soTest.mm, n.trees = 1000, type = "response")
+
+SSE = sum((test$Attendance - predict.boost)^2)
+SST = sum((test$Attendance - mean(train$Attendance))^2)
+OSR2 = 1 - SSE/SST
+OSR2
+
+mean(abs(test$Attendance - predict.boost))
+sqrt(mean((test$Attendance - predict.boost)^2))
+
+#boost is 66.2%, MAE: 881.6773, RMSE: 1352.463
+
+#Neural Network in R:
+
+
+```
+```{r}
+
+
+printMetricsHelp <- function(train, test, pred.train, pred.test, doExp) {
+  
+  OSR2 <- function(predictions, train, test) {
+  SSE <- sum((test - predictions)^2)
+  SST <- sum((test - mean(train))^2)
+  r2 <- 1 - SSE/SST
+  return(r2)
+}
+  trainRsq <- OSR2(pred.train, train, train)
+  testRsq <- OSR2(pred.test, train, test)
+  trainMAE <- mean(abs(train - pred.train))
+
+  testMAE <- mean(abs(test - pred.test))
+  trainRMSE <- sqrt(mean((train - pred.train)^2))
+  testRMSE <- sqrt(mean((test - pred.test)^2))
+  
+  print(str_c("Training set R^2: ", trainRsq))
+  print(str_c("Training set MAE: ", trainMAE))
+  print(str_c("Training set RMSE: ", trainRMSE))
+  print(str_c("Test set R^2: ", testRsq))
+  print(str_c("Test set MAE: ", testMAE))
+  print(str_c("Test set RMSE: ", testRMSE))
+}
+
+printMetrics <- function(train, test, pred.train, pred.test) {
+  print("Metrics for Attendance:")
+  printMetricsHelp(train, test, pred.train, pred.test, FALSE)
+}
+
+```
+
