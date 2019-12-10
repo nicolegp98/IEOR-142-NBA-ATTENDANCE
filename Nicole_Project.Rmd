@@ -17,8 +17,38 @@ library(rpart) # CART
 library(rpart.plot) # CART plotting
 library(caret) # cross validation
 library(tm.plugin.webmining)
-```
 
+printMetricsHelp <- function(train, test, pred.train, pred.test, doExp) {
+  
+  OSR2 <- function(predictions, train, test) {
+  SSE <- sum((test - predictions)^2)
+  SST <- sum((test - mean(train))^2)
+  r2 <- 1 - SSE/SST
+  return(r2)
+}
+  trainRsq <- OSR2(pred.train, train, train)
+  testRsq <- OSR2(pred.test, train, test)
+  trainMAE <- mean(abs(train - pred.train))
+
+  testMAE <- mean(abs(test - pred.test))
+  trainRMSE <- sqrt(mean((train - pred.train)^2))
+  testRMSE <- sqrt(mean((test - pred.test)^2))
+  
+  print(str_c("Training set R^2: ", trainRsq))
+  print(str_c("Training set MAE: ", trainMAE))
+  print(str_c("Training set RMSE: ", trainRMSE))
+  print(str_c("Test set R^2: ", testRsq))
+  print(str_c("Test set MAE: ", testMAE))
+  print(str_c("Test set RMSE: ", testRMSE))
+}
+
+printMetrics <- function(train, test, pred.train, pred.test) {
+  print("Metrics for Attendance:")
+  printMetricsHelp(train, test, pred.train, pred.test, FALSE)
+}
+
+```
+First, we must import the dataset and then convert Visitor, Month, DayofWeek as dummy variables. Next we split the data, with 75% in the training data and 25% in the test data. 
 ```{r}
 dataset <- read.csv("dataset_3.csv")
 head(dataset)
@@ -32,8 +62,9 @@ set.seed(456)
 train.ids = sample(nrow(dataset), 0.75*nrow(dataset))
 train = dataset[train.ids,]
 test = dataset[-train.ids,]
-
-
+```
+After that, I wanted to explore feature selection, I looked at the VIF scores as well as the significance to pick and choose values. When I saw that all VIF scores were between 1-2, I tried to explore other functions like varImp which calculates the importance of the variable to the performance of the model. I found that Playoffs and Last.Five were the 2 lowest values in varImp. 
+```{r}
 #Feature Selection 
 
 mod1 <- lm(Attendance ~  ., 
@@ -70,8 +101,12 @@ RMSE
 
 MAE = mean(abs(wPredictions- test$Attendance))
 MAE
+```
 
 
+After that I attempted to explore some feature transformations. I found that doing this transformation actually didn't benefit the model whatsoever. the OSR2 of the basic OLS,is far lower than the OSR2 of model with all the features. (Hence, why they're commented out.)
+
+```{r}
 
 #Let's try more transformations:
 
@@ -86,10 +121,6 @@ MAE
 #train = dataset[train.ids,]
 #test = dataset[-train.ids,]
 
-#I found that doing this transformation actually didn't benefit the model whatsoever. the OSR2 of the basic OLS,is far lower than the OSR2 of model with all the features. 
-
-
-
 mod1 <- lm(Attendance ~  ., 
            data = train)
 summary(mod1)
@@ -99,7 +130,11 @@ SST = sum((test$Attendance - mean(train$Attendance))^2)
 OSR2 = 1 - SSE/SST
 OSR2
 vif(mod1)
+```
 
+
+Following this, I explored LASSO and Ridge. LASSO and Ridge didn't do substanially great relative to the simple OLS model. 
+```{r}
 library(MASS)  # Package needed to generate correlated precictors
 library(glmnet)
 
@@ -136,8 +171,6 @@ printMetrics(y.train, y.test, pred.ridge.train, pred.ridge.test)
 
 
 
-
-
 #Lasso
 set.seed(456)
 cv.lasso <- cv.glmnet(x = x.train, y = y.train, alpha = 1)
@@ -153,7 +186,12 @@ pred.lasso.test <- predict(cv.lasso, newx = x.test)
 nzero.lasso <- predict(cv.lasso, type = "nonzero")
 
 printMetrics(y.train, y.test, pred.lasso.train, pred.lasso.test)
+```
 
+
+Likewise with Ridge and Lasso, Naive Least Squares and Forward Stepwise didn't necessarily outperform the OLS model.
+
+```{r}
 
 #Naive Least Squares
 pred.naivelr.train <- predict(mod.ridge, newx = x.train, s = 0, exact = TRUE,x = x.train, y = y.train)
@@ -175,6 +213,13 @@ pred.forward.test <- predict(mod.forward, newdata = test.df)
 printMetrics(y.train, y.test, pred.forward.train, pred.forward.test)
 
 
+```
+
+After this, I began to explore more of Random Forest. I did a simple random forest using the randomForest function and got 62.2% "Test set R^2: 0.622259610894571","Test set MAE: 922.611782037557","Test set RMSE: 1430.56233843614"
+
+After this, I wanted to explore what cross validating would do (as well as fine tuning mtry), I found that this performed slightly worse than the basic random forest model.
+
+```{r}
 #RF
 set.seed(456)
 library(randomForest)
@@ -204,8 +249,13 @@ SSE = sum((test$Attendance - predict.rf)^2)
 SST = sum((test$Attendance - mean(train$Attendance))^2)
 OSR2 = 1 - SSE/SST
 OSR2
+```
+
+Next, I really wanted to explore boosting to see what the impact of finely tuning the model would be. After running the boosting model, it became the best model ran thus far. Here are the metrics: OSR2 is 66.2%, MAE: 881.6773, RMSE: 1352.463
 
 
+
+```{r}
 #BOOSTING
 
 set.seed(456)
@@ -237,41 +287,14 @@ sqrt(mean((test$Attendance - predict.boost)^2))
 
 #boost is 66.2%, MAE: 881.6773, RMSE: 1352.463
 
-#Neural Network in R:
 
 
 ```
+
+
+Neural Network
 ```{r}
-
-
-printMetricsHelp <- function(train, test, pred.train, pred.test, doExp) {
-  
-  OSR2 <- function(predictions, train, test) {
-  SSE <- sum((test - predictions)^2)
-  SST <- sum((test - mean(train))^2)
-  r2 <- 1 - SSE/SST
-  return(r2)
-}
-  trainRsq <- OSR2(pred.train, train, train)
-  testRsq <- OSR2(pred.test, train, test)
-  trainMAE <- mean(abs(train - pred.train))
-
-  testMAE <- mean(abs(test - pred.test))
-  trainRMSE <- sqrt(mean((train - pred.train)^2))
-  testRMSE <- sqrt(mean((test - pred.test)^2))
-  
-  print(str_c("Training set R^2: ", trainRsq))
-  print(str_c("Training set MAE: ", trainMAE))
-  print(str_c("Training set RMSE: ", trainRMSE))
-  print(str_c("Test set R^2: ", testRsq))
-  print(str_c("Test set MAE: ", testMAE))
-  print(str_c("Test set RMSE: ", testRMSE))
-}
-
-printMetrics <- function(train, test, pred.train, pred.test) {
-  print("Metrics for Attendance:")
-  printMetricsHelp(train, test, pred.train, pred.test, FALSE)
-}
+#Neural Network in R:
 
 ```
 
