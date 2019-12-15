@@ -10,9 +10,12 @@ Try executing this chunk by clicking the *Run* button within the chunk or by pla
 ```{r}
 library(dplyr)
 library(ggplot2)
+
+
 library(GGally)
 library(caTools)
 library(ROCR)
+
 library(rpart) # CART
 library(rpart.plot) # CART plotting
 library(caret) # cross validation
@@ -50,18 +53,29 @@ printMetrics <- function(train, test, pred.train, pred.test) {
 ```
 First, we must import the dataset and then convert Visitor, Month, DayofWeek as dummy variables. Next we split the data, with 75% in the training data and 25% in the test data. 
 ```{r}
-dataset <- read.csv("dataset_3.csv")
-head(dataset)
+dataset <- read.csv("new_dataset.csv")
+
+dataset <- subset(dataset,select = -c(X))
+
+#dataset$Visitor <- as.numeric(dataset$Visitor)
+#dataset$Home <- as.numeric(dataset$Home)
+#dataset$Month <- as.numeric(dataset$Month)
+#dataset$Day.of.Week <- as.numeric(dataset$Day.of.Week)
+
+library(dplyr)
 dataset <- subset(dataset,select = -c(Time))
-
-dataset$Visitor <- as.numeric(dataset$Visitor)
-dataset$Month <- as.numeric(dataset$Month)
-dataset$Day.of.Week <- as.numeric(dataset$Day.of.Week)
-
 set.seed(456)
-train.ids = sample(nrow(dataset), 0.75*nrow(dataset))
-train = dataset[train.ids,]
-test = dataset[-train.ids,]
+#train.ids = sample(nrow(dataset), 0.75*nrow(dataset))
+#train = dataset[train.ids,]
+#test = dataset[-train.ids,]
+train <- filter(dataset, Year > 2010)
+train <- filter(train, Year <= 2016)
+test <- filter(dataset, Year > 2016) 
+
+
+train
+
+
 ```
 After that, I wanted to explore feature selection, I looked at the VIF scores as well as the significance to pick and choose values. When I saw that all VIF scores were between 1-2, I tried to explore other functions like varImp which calculates the importance of the variable to the performance of the model. I found that Playoffs and Last.Five were the 2 lowest values in varImp. 
 ```{r}
@@ -76,7 +90,7 @@ SST = sum((test$Attendance - mean(train$Attendance))^2)
 OSR2 = 1 - SSE/SST
 OSR2
 library(car)
-vif(mod1)
+#vif(mod1)
 
 
 library(caret)
@@ -84,7 +98,7 @@ rpartImp <- varImp(mod1)
 print(rpartImp)
 
 
-mod2 <- lm(Attendance ~  Capacity + Curr.Win.. + LS.Win.. + Last.Game + H.Pop + V.Pop + Visitor, 
+mod2 <- lm(Attendance ~  . - Last.Five - Playoffs., 
            data = train)
 summary(mod2)
 wPredictions <- predict(mod2, newdata=test)
@@ -129,7 +143,7 @@ SSE = sum((test$Attendance - wPredictions)^2)
 SST = sum((test$Attendance - mean(train$Attendance))^2)
 OSR2 = 1 - SSE/SST
 OSR2
-vif(mod1)
+#vif(mod1)
 ```
 
 
@@ -139,13 +153,13 @@ library(MASS)  # Package needed to generate correlated precictors
 library(glmnet)
 
 y.train <- train$Attendance
-x.train <- model.matrix(Attendance ~ ., train)
+x.train <- model.matrix(Attendance ~ . , train)
 fit.lasso <- glmnet(x.train, y.train, family="gaussian", alpha=1)
 fit.ridge <- glmnet(x.train, y.train, family="gaussian", alpha=0)
 
 
 y.test <- test$Attendance
-x.test <- model.matrix(Attendance ~., test)
+x.test <- model.matrix(Attendance ~. , test)
 
 
 train.df <- as.data.frame(cbind(y.train, x.train))
@@ -164,10 +178,20 @@ cv.ridge <- cv.glmnet(x = x.train, y = y.train, alpha = 0)
 
 library(stringr)
 plot(cv.ridge)
+
 print(str_c("Chosen lambda: ", cv.ridge$lambda.1se))
 pred.ridge.train <- predict(cv.ridge, newx = x.train)
 pred.ridge.test <- predict(cv.ridge, newx = x.test)
 printMetrics(y.train, y.test, pred.ridge.train, pred.ridge.test)
+
+#[1] "Chosen lambda: 538.437805876826"
+#[1] "Metrics for Attendance:"
+#[1] "Training set R^2: 0.628981460212174"
+#[1] "Training set MAE: 1172.07104152878"
+#[1] "Training set RMSE: 1556.28900606813"
+#[1] "Test set R^2: 0.555659153130307"
+#[1] "Test set MAE: 1080.510946562"
+#[1] "Test set RMSE: 1464.2352802899"
 
 
 
@@ -186,6 +210,15 @@ pred.lasso.test <- predict(cv.lasso, newx = x.test)
 nzero.lasso <- predict(cv.lasso, type = "nonzero")
 
 printMetrics(y.train, y.test, pred.lasso.train, pred.lasso.test)
+
+
+#[1] "Metrics for Attendance:"
+#[1] "Training set R^2: 0.505180040535392"
+#[1] "Training set MAE: 1133.88728685816"
+#[1] "Training set RMSE: 1642.31254698033"
+#[1] "Test set R^2: 0.478181602723417"
+#[1] "Test set MAE: 1153.75700789927"
+#[1] "Test set RMSE: 1681.39506752629"
 ```
 
 
@@ -197,6 +230,14 @@ Likewise with Ridge and Lasso, Naive Least Squares and Forward Stepwise didn't n
 pred.naivelr.train <- predict(mod.ridge, newx = x.train, s = 0, exact = TRUE,x = x.train, y = y.train)
 pred.naivelr.test <- predict(mod.ridge, newx = x.test, s = 0, exact = TRUE, x = x.train, y = y.train)
 printMetrics(y.train, y.test, pred.naivelr.train, pred.naivelr.test)
+
+#[1] "Metrics for Attendance:"
+#[1] "Training set R^2: 0.643572228614264"
+#[1] "Training set MAE: 1161.00990816624"
+#[1] "Training set RMSE: 1525.38057362366"
+#[1] "Test set R^2: 0.44843618286677"
+#[1] "Test set MAE: 1242.08095015532"
+#[1] "Test set RMSE: 1631.36308930418"
 
 #Forward Stepwise
 mod.initial <- lm(y.train ~ 1, data = train.df)
@@ -211,6 +252,15 @@ pred.forward.train <- predict(mod.forward, newdata = train.df)
 pred.forward.test <- predict(mod.forward, newdata = test.df)
 
 printMetrics(y.train, y.test, pred.forward.train, pred.forward.test)
+
+
+#[1] "Metrics for Attendance:"
+#[1] "Training set R^2: 0.617630706541637"
+#[1] "Training set MAE: 956.491066272541"
+#[1] "Training set RMSE: 1377.90258343443"
+#[1] "Test set R^2: 0.591523632366056"
+#[1] "Test set MAE: 901.305488584504"
+#[1] "Test set RMSE: 1196.84524146555"
 
 
 ```
@@ -294,7 +344,7 @@ sqrt(mean((test$Attendance - predict.boost)^2))
 
 Neural Network
 ```{r}
-#Neural Network in R:
+
 
 ```
 
